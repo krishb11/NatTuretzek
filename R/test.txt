@@ -1,0 +1,36 @@
+FBgn0052495 (2)
+FBgn0052823 (2)
+FBgn0052819 (2)
+FBgn0053502 (3)
+FBgn0050382 (2)
+FBgn0042086 (2)
+FBgn0050031 (3)
+FBgn0051617 (2)
+FBgn0053855 (3)
+FBgn0053869 (4)
+FBgn0053891 (5)
+FBgn0053810 (7)
+FBgn0053871 (13)
+FBgn0053804 (8)
+FBgn0053868 (23)
+FBgn0043069 (2)
+FBgn0037731 (2)
+FBgn0013276 (2)
+FBgn0086900 (2)
+FBgn0260434 (2)
+FBgn0261360 (2)
+FBgn0261361 (2)
+FBgn0020643 (2)
+FBgn0053853 (3)
+FBgn0053818 (5)
+FBgn0051618 (17)
+FBgn0053803 (18)
+
+
+names <- lapply(names, function(a) { 
+		if(length(a)==2) {
+			return(a)
+		} else {
+			return(NULL)
+		}
+	})
