@@ -1,289 +1,302 @@
-# This file contains all the functions related to kallisto you'll need to count the seq data as well as analyse it.
-# Only some kinds of visualization is available and you need to decipher your own methods sometimes
+#' Run kallisto-based quantification and collect expression matrices
+#'
+#' `MyMuse()` is a lightweight constructor that can:
+#' 1) run `kallisto index` and `kallisto quant`, and
+#' 2) load abundance tables into TPM / count / effective-length matrices.
+#'
+#' @param cdsfile Path to transcript FASTA file used for kallisto indexing.
+#' @param fastqfiles_dir Directory containing FASTQ(.gz) files.
+#' @param replicates Number of replicates per condition (used for averaging).
+#' @param paired_end Logical; `TRUE` for paired-end, `FALSE` for single-end.
+#' @param fragment_length Fragment length (single-end only).
+#' @param sd Fragment length standard deviation (single-end only).
+#' @param bootstrap_samples Number of kallisto bootstrap samples.
+#' @param kallisto_bin Path to kallisto binary.
+#' @param index_file Path for temporary kallisto index.
+#' @param run_quant Logical; if `FALSE`, skip quant and only parse existing outputs.
+#' @param cleanup_index Logical; remove index file after run.
+#'
+#' @return A `MyMuse` object (named list) with quantification matrices.
+#' @export
+MyMuse <- function(
+  cdsfile,
+  fastqfiles_dir,
+  replicates,
+  paired_end = TRUE,
+  fragment_length = NULL,
+  sd = NULL,
+  bootstrap_samples = 100,
+  kallisto_bin = "kallisto",
+  index_file = "index.idx",
+  run_quant = TRUE,
+  cleanup_index = TRUE
+) {
+  stopifnot(file.exists(cdsfile), dir.exists(fastqfiles_dir), replicates >= 1)
 
-# Constructor and Automated function to generate different datatypes   
+  value <- list(
+    cdsfile = cdsfile,
+    fastqfiles_dir = fastqfiles_dir,
+    reps = replicates,
+    paired_end = paired_end,
+    fragment_length = fragment_length,
+    sd = sd,
+    bootstrap_samples = bootstrap_samples,
+    kallisto_bin = kallisto_bin,
+    index_file = index_file,
+    names = NULL,
+    tpms = NULL,
+    eff_lengths = NULL,
+    est_counts = NULL,
+    rpkms = NULL,
+    average_rpkms = NULL,
+    fpkms = NULL,
+    average_fpkms = NULL
+  )
+  class(value) <- "MyMuse"
 
-MyMuse <- function(cdsfile, fastqfiles_dir, replicates) {	
-	value <- list(cdsfile=cdsfile, fastqfiles_dir=fastqfiles_dir, num=NULL, tpms=NULL, rpkms=NULL, eff_lengths=NULL, est_counts=NULL, reps=replicates, names=NULL)
-	attr(value, "class") <- "MyMuse"
-	print("Is it single-end or paired-end? Type 1 for single and 2 for paired and press enter. Same for the rest that will follow")
-	value$num <- as.numeric(readline())
-	value$names <- RunKallisto(value)
-	value$tpms <- GetTPMs(value)
-	value$eff_lengths <- Getefflengths(value)
-	value$est_counts <- GetFinalCounts(value)
-	if(value$num==1) {
-		value$rpkms <- GetRPKMs(value)
-		value$average_rpkms <- GetAverageRPKMS(value)	
-	} else {
-		value$fpkms <- GetFPKMs(value)
-		value$average_fpkms <- GetAverageFPKMS(value)
-	}
-	
-	return(value)
+  if (run_quant) {
+    value$names <- RunKallisto(value, cleanup_index = cleanup_index)
+  } else {
+    value$names <- infer_sample_names(fastqfiles_dir, paired_end)
+  }
+
+  value$tpms <- GetTPMs(value)
+  value$eff_lengths <- Getefflengths(value)
+  value$est_counts <- GetFinalCounts(value)
+
+  if (isTRUE(value$paired_end)) {
+    value$fpkms <- GetFPKMs(value)
+    value$average_fpkms <- GetAverageFPKMS(value)
+  } else {
+    value$rpkms <- GetRPKMs(value)
+    value$average_rpkms <- GetAverageRPKMS(value)
+  }
+
+  value
 }
 
-#MyMuse(cdsfile="dmel-all-cds.fastq.gz", fastqfiles_dir="/home/krishna/test_Nat/run_Kallisto/mel", replicates=3)
+#' Run kallisto index + quant
+#' @param MuseObject A `MyMuse` object.
+#' @param cleanup_index Logical; delete index file after quantification.
+#' @return Character vector of sample names.
+#' @export
+RunKallisto <- function(MuseObject, cleanup_index = TRUE) {
+  build_kallisto_index(
+    kallisto_bin = MuseObject$kallisto_bin,
+    index_file = MuseObject$index_file,
+    cdsfile = MuseObject$cdsfile
+  )
 
-# Function to get counts from kallisto:
-RunKallisto <- function(MuseObject, check=TRUE) {
-	kallisto_commands <- c("index", "quant", "bus", "inspect")
-	kallisto_file_type <- c("--single","--paired")
-	kallisto_mods <- c("-l", "-s")
-	bootstrap <- "-b"
-	index <- FALSE 
-	if(!index) {
-		print("Creating indexed cds file.....")
-		x <- paste("~/anaconda3/bin/kallisto", kallisto_commands[1], "-i index.idx" , MuseObject$cdsfile, sep=" ")
-		if(check) {
-			cat(x)
-		}
-		system(x)
-		index <- TRUE
-		print("done")
-	}
-	#Fastq files must be in terms of directory they belong to
-	filenames <- list.files(MuseObject$fastqfiles_dir, pattern="*.f*.gz", full.names=TRUE) 
-	count <- 1
-	print(filenames)
-	num <- MuseObject$num	
-	if(num==1) {
-			print("values of -l and -s respctively")
-			l <- as.numeric(readline())
-			s <- as.numeric(readline())
-			print("How many time you want to do bootstrapping")
-			b <- as.numeric(readline())
-			names <- lapply(filenames, function(x) {
-				x <- unlist(strsplit(x, split="/"))
-				x <- tail(x, n=1)
-				x <- unlist(strsplit(x, split=".", fixed=TRUE))
-				x <- x[1]
-				return(x)
-			})
-			final_output <- lapply(filenames, function(x, kallisto_commands.=kallisto_commands, 
-							kallisto_file_type.=kallisto_file_type, kallisto_nums.=MuseObject$kallisto_nums) {
-				y <- paste("~/anaconda3/bin/kallisto", kallisto_commands.[2], "-i index.idx -o", names[count], kallisto_file_type.[1], 
-					kallisto_mods[1], l, kallisto_mods[2], s, "-b", b, x, sep=" ")
-					count <<- count + 1
-				return(y)
-			})
-			lapply(final_output, system)
-	} else {
-			names <- lapply(filenames, function(x) {
-				x <- unlist(strsplit(x, split="/"))
-				x <- tail(x, n=1)
-				x <- unlist(strsplit(x, split=".", fixed=TRUE))
-				x <- x[1]
-				x <- unlist(strsplit(x, split="_"))
-				x <- x[1]
-				return(x)
-			})
-			names <- as.character(names)
-			print("How many time you want to do bootstrapping")
-			b <- as.numeric(readline())
-			final_output <- lapply(filenames, function(x, kallisto_commands.=kallisto_commands, names.=names, b.=b) {
-				y <- paste("~/anaconda3/bin/kallisto", kallisto_commands.[2], "-i index.idx", "-o", names.[count], "-b", b., sep=" ")
-				count <<- count + 1
-				return(y)
-				})
-			count <- 1
-			final_output <- unlist(final_output)
-				for(i in 1:length(final_output)) {
-					if(i%%2 == 0) {
-						next
-					} else {
-						z[count] <- paste(final_output[i], filenames[i], filenames[i+1], sep=" ")
-						print(z[count])
-						system(z[count])
-						count <- count + 1
-					}
-				}
-	}
-	system('rm -rf index.idx')
-	return(names)
+  if (isTRUE(MuseObject$paired_end)) {
+    sample_pairs <- discover_paired_fastqs(MuseObject$fastqfiles_dir)
+    sample_names <- names(sample_pairs)
+    run_kallisto_paired(MuseObject, sample_pairs)
+  } else {
+    sample_files <- discover_single_fastqs(MuseObject$fastqfiles_dir)
+    sample_names <- remove_fastq_extensions(basename(sample_files))
+    run_kallisto_single(MuseObject, sample_files, sample_names)
+  }
+
+  if (isTRUE(cleanup_index) && file.exists(MuseObject$index_file)) {
+    file.remove(MuseObject$index_file)
+  }
+
+  sample_names
 }
 
-read_delim <- function(x, sep="\t") {
-	return(read.delim(x, sep=sep, header=TRUE))
+#' Read TSV with stable defaults
+#' @param x File path.
+#' @param sep Delimiter.
+#' @return data.frame
+#' @export
+read_delim <- function(x, sep = "\t") {
+  read.delim(x, sep = sep, header = TRUE, stringsAsFactors = FALSE)
 }
 
-#Go to the directory above all the kallisto directories
+#' Collect TPM matrix from kallisto output directories
+#' @param MuseObject A `MyMuse` object.
+#' @return data.frame with `target_id` and sample columns.
+#' @export
 GetTPMs <- function(MuseObject) {
-	print("acquiring tpms.........")
-	filenames <- lapply(MuseObject$names, function(x) {
-			x <- list.files(x, pattern="*.tsv", full.names=TRUE)
-			return(x)
-		})
-	files <- lapply(filenames, read_delim)
-	files <- lapply(files, as.data.frame)
-	#head(files)
-	tpms <- lapply(files, function(x) {
-			x <- x$tpm
-			return(x)
-		})
-	tpms[[length(tpms)+1]] <- files[[1]][,1]
-	names(tpms) <- c(unlist(MuseObject$names), "target_id")
-	print("done")
-	return(as.data.frame(tpms))	
+  collect_abundance_field(MuseObject, "tpm")
 }
 
-#Go to the directory above all the kallisto directories
+#' Collect effective length matrix from kallisto output directories
+#' @param MuseObject A `MyMuse` object.
+#' @return data.frame with `target_id` and sample columns.
+#' @export
 Getefflengths <- function(MuseObject) {
-	print("acquiring eff_lengths.........")
-	filenames <- lapply(MuseObject$names, function(x) {
-			x <- list.files(x, pattern="*.tsv", full.names=TRUE)
-			return(x)
-		})
-	files <- lapply(filenames, read_delim)
-	files <- lapply(files, as.data.frame)
-	eff_length <- lapply(files, function(x) {
-			x <- x$eff_length
-			return(x)
-		})
-	eff_length[[length(eff_length)+1]] <- files[[1]][,1]
-	names(eff_length) <- c(unlist(MuseObject$names), "target_id")
-	print("done")
-	return(as.data.frame(eff_length))
+  collect_abundance_field(MuseObject, "eff_length")
 }
 
+#' Collect estimated count matrix from kallisto output directories
+#' @param MuseObject A `MyMuse` object.
+#' @return data.frame with `target_id` and sample columns.
+#' @export
 GetFinalCounts <- function(MuseObject) {
-	print("acquiring estimated counts.......")
-	filenames <- lapply(MuseObject$names, function(x) {
-			x <- list.files(x, pattern="*.tsv", full.names=TRUE)
-			return(x)
-		})
-	files <- lapply(filenames, read_delim)
-	files <- lapply(files, as.data.frame)
-	est_counts <- lapply(files, function(x) {
-			x <- x$est_counts
-			return(x)
-		})
-	est_counts[[length(est_counts)+1]] <- files[[1]][,1]
-	names(est_counts) <- c(unlist(MuseObject$names), "target_id")
-	print("done")
-	return(as.data.frame(est_counts))
+  collect_abundance_field(MuseObject, "est_counts")
 }
 
-#The output directory in the below file must be the top level directory of kallisto output directory
+#' Compute RPKM matrix (single-end)
+#' @param MuseObject A `MyMuse` object.
+#' @return data.frame with `target_id` and RPKM columns.
+#' @export
 GetRPKMs <- function(MuseObject) {
-	print("acquiring rpkms......")
-	counts <- MuseObject$est_counts[,1:(ncol(MuseObject$est_counts)-1)]
-	eff_lengths <- MuseObject$eff_lengths[,1]
-	indi_rpkms <- function(counts, .eff_lengths=eff_lengths) {
-		for(i in 1:length(counts)) {
-			v[i] <- counts[i]/(.eff_lengths[i]/1000 * sum(counts)/1000000)
-		}
-		return(v)
-	}
-	rpkms <- apply(counts, indi_rpkms)
-	d <- cbind(MuseObject$est_counts[,"target_id"], rpkms)
-	colnames(d) <- c("target_id", MuseObject$names)
-	return(as.data.frame(d))
-	print("done")
+  counts <- as.matrix(MuseObject$est_counts[, setdiff(names(MuseObject$est_counts), "target_id")])
+  eff_lengths <- MuseObject$eff_lengths[[2]]
+  col_sums <- colSums(counts)
+  rpkm <- sweep(counts, 2, col_sums / 1e6, "/")
+  rpkm <- sweep(rpkm, 1, eff_lengths / 1e3, "/")
+  data.frame(target_id = MuseObject$est_counts$target_id, as.data.frame(rpkm), check.names = FALSE)
 }
 
+#' Compute per-condition average RPKM matrix
+#' @param MuseObject A `MyMuse` object.
+#' @return data.frame with `target_id` and averaged columns.
+#' @export
 GetAverageRPKMS <- function(MuseObject) {
-	print("Acquiring average rpkms......")
-	names <- MuseObject$names
-	rpkms <- MuseObject$rpkms
-	replicates <- MuseObject$reps
-	rpkms$target_id <- NULL
-	col <- seq(1, ncol(rpkms)-replicates+1, replicates)
-	average_rpkms <- lapply(col, function(x) {
-			d <- rpkms[, x:(x+replicates-1)]
-			d <- rowSums(d)/replicates
-			return(d)
-		})
-	return(as.data.frame(cbind(as.character(MuseObject$rpkms$target_id), average_rpkms)))
+  average_by_replicates(MuseObject$rpkms, MuseObject$reps)
 }
 
+#' Compute FPKM matrix (paired-end)
+#' @param MuseObject A `MyMuse` object.
+#' @return data.frame with `target_id` and FPKM columns.
+#' @export
 GetFPKMs <- function(MuseObject) {
-	print("acquiring fpkms......")
-	counts <- MuseObject$est_counts[,1:(ncol(MuseObject$est_counts)-1)]
-	eff_lengths <- MuseObject$eff_lengths[,2]
-	indi_fpkms <- function(counts, eff_lengths=eff_lengths) {
-		for(i in 1:length(counts)) {
-			v[i] <- counts[i]/(eff_lengths[i]/1000 * sum(counts)/1000000)
-		}
-		return(v)
-	}
-	fpkms <- apply(counts, indi_fpkms)
-	d <- cbind(MuseObject$est_counts[,1], fpkms)
-	colnames(d) <- c("target_id", names)
-	print("done")
-	return(as.data.frame(d))	
+  counts <- as.matrix(MuseObject$est_counts[, setdiff(names(MuseObject$est_counts), "target_id")])
+  eff_lengths <- MuseObject$eff_lengths[[2]]
+  col_sums <- colSums(counts)
+  fpkm <- sweep(counts, 2, col_sums / 1e6, "/")
+  fpkm <- sweep(fpkm, 1, eff_lengths / 1e3, "/")
+  data.frame(target_id = MuseObject$est_counts$target_id, as.data.frame(fpkm), check.names = FALSE)
 }
 
+#' Compute per-condition average FPKM matrix
+#' @param MuseObject A `MyMuse` object.
+#' @return data.frame with `target_id` and averaged columns.
+#' @export
 GetAverageFPKMS <- function(MuseObject) {
-	print("Acquiring average rpkms......")
-	names <- MuseObject$names
-	rpkms <- MuseObject$rpkms
-	replicates <- MuseObject$reps
-	rpkms$target_id <- NULL
-	col <- seq(1, ncol(rpkms)-replicates+1, replicates)
-	average_rpkms <- lapply(col, function(x) {
-			d <- rpkms[, x:(x+replicates-1)]
-			d <- rowSums(d)/replicates
-			return(d)
-		})
-	return(as.data.frame(cbind(as.character(MuseObject$rpkms$target_id), average_rpkms)))
+  average_by_replicates(MuseObject$fpkms, MuseObject$reps)
 }
 
+#' Reorder sample names
+#' @param MuseObject A `MyMuse` object.
+#' @param order Integer index order.
+#' @return Character vector.
+#' @export
 reorder_names <- function(MuseObject, order) {
-	return(MuseObject$names[order])
+  MuseObject$names[order]
 }
 
-# heatmap_plotter <- function(MuseObject, which_genes, genes=TRUE, order_for_y, labels, order_for_x, colors) {
-# 	rpkms <- MuseObject$rpkms
-# 	names <- MuseObject$names
-# 	if(!genes) {
-# 		rpkms <- rpkms[rpkms$target_id %in% which_genes[,1], ]
-# 	} else {
-# 		mart <- biomaRt::useMart(biomart = "ENSEMBL_MART_ENSEMBL", dataset = "dmelanogaster_gene_ensembl", host = 'ensembl.org')
-# 		t2g <- biomaRt::getBM(attributes = c("ensembl_transcript_id","ensembl_gene_id", "external_gene_name"), mart = mart)
-# 		t2g <- dplyr::rename(t2g, transcript=ensembl_transcript_id ,gene_id = ensembl_gene_id, ext_gene = external_gene_name)	
-# 		rpkms$target_id <- vapply(target_id, function(x, data=t2g) {
-# 				if(x %in% t2g$ensembl_transcript_id) {
-# 					var <- t2g[t2g$ensembl_transcript_id %in% x, ]
-# 					var <- var$ensembl_gene_id
-# 					return(var)
-# 				}	
-# 			}, character(1))
-# 		list <- list()
-# 		for(i in 1:length(unique(rpkms$target_id))) {
-# 			list[[i]] <- rpkms[rpkms$target_id %in% unique(rpkms$target_id)[i], ]
-# 			list[[i]]$target_id <- NULL
-# 		}
-# 		indi_adder <- function(lister, v=names) {
-# 			sums <- c()
-# 			for(j in 1:length(v)) {
-# 				dummy <- sum(lister[,v[j]])
-# 				sums <- c(sums, dummy)
-# 			}
-# 			names(sums) <- names
-# 			return(sums)
-# 		}
-# 		list <- lapply(list, function(x) {
-# 				x <- indi_adder(x)
-# 				return(x)
-# 			})
-# 		d <- data.frame()
-# 		for(i in 1:length(list)) {
-# 			d[i,] <- list[[i]]
-# 		}
-# 		rpkms <- cbind(as.character(unique(rpkms$target_id)), d)
-# 		colnames(d) <- c("target_id", names)
-# 	}
-# 	rownames(rpkms) <- rpkms$target_id
-# 	rpkms$target_id <- NULL
-# 	data_for_graph <- rpkms %>%
-# 		rownames_to_column() %>%
-#   			gather(colname, value, -rowname)
-# 			colnames(dt2) <- c("Gene", "Timepoint", "log2rpkm")
-# 	data_for_graph$Timepoint <- factor(data_for_graph$Timepoint, levels=unique(data_for_graph$Timepoint)[order_for_x])
-# }
+#' Location where users can place example FASTA/FASTQ files
+#' @return Character path inside installed package.
+#' @export
+kallisto_test_data_dir <- function() {
+  system.file("extdata", "kallisto", package = "NatTuretzek")
+}
 
+infer_sample_names <- function(fastq_dir, paired_end) {
+  if (isTRUE(paired_end)) {
+    names(discover_paired_fastqs(fastq_dir))
+  } else {
+    remove_fastq_extensions(basename(discover_single_fastqs(fastq_dir)))
+  }
+}
 
+build_kallisto_index <- function(kallisto_bin, index_file, cdsfile) {
+  cmd <- paste(shQuote(kallisto_bin), "index", "-i", shQuote(index_file), shQuote(cdsfile))
+  status <- system(cmd)
+  if (status != 0) stop("kallisto index failed", call. = FALSE)
+}
 
+run_kallisto_single <- function(MuseObject, sample_files, sample_names) {
+  if (is.null(MuseObject$fragment_length) || is.null(MuseObject$sd)) {
+    stop("fragment_length and sd are required for single-end runs.", call. = FALSE)
+  }
 
+  for (i in seq_along(sample_files)) {
+    out_dir <- sample_names[[i]]
+    cmd <- paste(
+      shQuote(MuseObject$kallisto_bin), "quant",
+      "-i", shQuote(MuseObject$index_file),
+      "-o", shQuote(out_dir),
+      "--single",
+      "-l", MuseObject$fragment_length,
+      "-s", MuseObject$sd,
+      "-b", MuseObject$bootstrap_samples,
+      shQuote(sample_files[[i]])
+    )
+    status <- system(cmd)
+    if (status != 0) stop(sprintf("kallisto quant failed for sample %s", out_dir), call. = FALSE)
+  }
+}
 
+run_kallisto_paired <- function(MuseObject, sample_pairs) {
+  for (sample_name in names(sample_pairs)) {
+    pair <- sample_pairs[[sample_name]]
+    cmd <- paste(
+      shQuote(MuseObject$kallisto_bin), "quant",
+      "-i", shQuote(MuseObject$index_file),
+      "-o", shQuote(sample_name),
+      "-b", MuseObject$bootstrap_samples,
+      shQuote(pair[[1]]), shQuote(pair[[2]])
+    )
+    status <- system(cmd)
+    if (status != 0) stop(sprintf("kallisto quant failed for sample %s", sample_name), call. = FALSE)
+  }
+}
+
+discover_single_fastqs <- function(fastq_dir) {
+  files <- list.files(fastq_dir, pattern = "\\.(fastq|fq)(\\.gz)?$", full.names = TRUE, ignore.case = TRUE)
+  if (length(files) == 0) stop("No FASTQ files found.", call. = FALSE)
+  sort(files)
+}
+
+discover_paired_fastqs <- function(fastq_dir) {
+  files <- discover_single_fastqs(fastq_dir)
+  base <- basename(files)
+
+  cleaned <- gsub("(_R?[12]|_[12])(?=\\.(fastq|fq)(\\.gz)?$)", "", base, perl = TRUE, ignore.case = TRUE)
+  groups <- split(files, cleaned)
+  groups <- groups[lengths(groups) == 2]
+
+  if (length(groups) == 0) {
+    stop("Could not infer paired-end FASTQ pairs from filenames.", call. = FALSE)
+  }
+
+  lapply(groups, sort)
+}
+
+remove_fastq_extensions <- function(x) {
+  gsub("\\.(fastq|fq)(\\.gz)?$", "", x, ignore.case = TRUE)
+}
+
+collect_abundance_field <- function(MuseObject, field) {
+  tables <- lapply(MuseObject$names, function(sample_name) {
+    file <- file.path(sample_name, "abundance.tsv")
+    if (!file.exists(file)) stop(sprintf("Missing abundance file: %s", file), call. = FALSE)
+    read_delim(file)
+  })
+
+  target_id <- tables[[1]][["target_id"]]
+  values <- lapply(tables, function(df) df[[field]])
+  names(values) <- MuseObject$names
+  values[["target_id"]] <- target_id
+  data.frame(values, check.names = FALSE)
+}
+
+average_by_replicates <- function(expression_df, replicates) {
+  stopifnot(replicates >= 1)
+  ids <- expression_df$target_id
+  mat <- as.matrix(expression_df[, setdiff(names(expression_df), "target_id")])
+
+  group_starts <- seq(1, ncol(mat), by = replicates)
+  grouped <- lapply(group_starts, function(start_col) {
+    end_col <- min(start_col + replicates - 1, ncol(mat))
+    rowMeans(mat[, start_col:end_col, drop = FALSE])
+  })
+
+  out <- as.data.frame(grouped)
+  names(out) <- paste0("group_", seq_along(grouped))
+  data.frame(target_id = ids, out, check.names = FALSE)
+}
