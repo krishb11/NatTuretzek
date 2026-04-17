@@ -1,6 +1,5 @@
 library("dplyr")
 library("readr")
-library("Biostrings")
 
 #' Parse exonerate GFF and extract transcript FASTA sequences
 #'
@@ -12,6 +11,9 @@ library("Biostrings")
 #' @return `MyDeep` object.
 #' @export
 MyDeep <- function(file, species, style = "exonerate", genomefile) {
+  if (!requireNamespace("Biostrings", quietly = TRUE)) {
+    stop("Package 'Biostrings' is required for MyDeep().", call. = FALSE)
+  }
   stopifnot(file.exists(file), file.exists(genomefile))
 
   value <- list(
@@ -100,7 +102,7 @@ gffeditor <- function(DeepObject) {
 gff2fastaprinter <- function(DeepObject, edited_gff_object = NULL, output_file = NULL) {
   exon_list <- if (is.null(edited_gff_object)) DeepObject$edited_gff_object else edited_gff_object
 
-  genome <- readDNAStringSet(DeepObject$genomefile)
+  genome <- Biostrings::readDNAStringSet(DeepObject$genomefile)
   names(genome) <- vapply(strsplit(names(genome), " "), `[`, character(1), 1)
 
   seqs <- lapply(exon_list, function(exons) {
@@ -112,8 +114,8 @@ gff2fastaprinter <- function(DeepObject, edited_gff_object = NULL, output_file =
     pieces <- vapply(seq_len(nrow(exons)), function(i) {
       start <- exons$start[[i]]
       end <- exons$end[[i]]
-      if (start > width(ref) || end > width(ref)) return("")
-      as.character(subseq(ref, start = start, end = end))
+      if (start > Biostrings::width(ref) || end > Biostrings::width(ref)) return("")
+      as.character(Biostrings::subseq(ref, start = start, end = end))
     }, character(1))
 
     paste0(pieces, collapse = "")
@@ -121,11 +123,11 @@ gff2fastaprinter <- function(DeepObject, edited_gff_object = NULL, output_file =
 
   seqs <- unlist(seqs, use.names = TRUE)
   seqs <- seqs[!is.na(seqs)]
-  dat <- DNAStringSet(seqs)
+  dat <- Biostrings::DNAStringSet(seqs)
 
   if (is.null(output_file)) {
     output_file <- paste(DeepObject$species, "transcripts", "fasta", sep = ".")
   }
-  writeXStringSet(dat, output_file)
+  Biostrings::writeXStringSet(dat, output_file)
   dat
 }

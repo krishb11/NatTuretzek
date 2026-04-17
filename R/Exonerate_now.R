@@ -1,5 +1,4 @@
 library("dplyr")
-library("Biostrings")
 library("readr")
 
 # Resolve executable path with optional user override.
@@ -56,6 +55,9 @@ MyWitness <- function(
   blast_params = list(),
   exonerate_params = list()
 ) {
+  if (!requireNamespace("Biostrings", quietly = TRUE)) {
+    stop("Package 'Biostrings' is required for MyWitness().", call. = FALSE)
+  }
   stopifnot(file.exists(pathtogenome), file.exists(pathtoqueryfile))
 
   cds_path <- if (is.null(pathtocdsfile)) pathtoqueryfile else pathtocdsfile
@@ -180,14 +182,14 @@ runBlast <- function(WitnessObject, split = 2000, additional_args = NULL) {
 #' @return Invisibly returns output FASTA file paths.
 #' @export
 GetDataForExonerate <- function(WitnessObject) {
-  genome <- readDNAStringSet(WitnessObject$genome)
-  cdsfiles <- readDNAStringSet(WitnessObject$cdsfile)
+  genome <- Biostrings::readDNAStringSet(WitnessObject$genome)
+  cdsfiles <- Biostrings::readDNAStringSet(WitnessObject$cdsfile)
 
   write_one_fasta <- function(seq_set) {
     lapply(seq_along(seq_set), function(i) {
       name <- names(seq_set)[[i]]
       out <- file.path(WitnessObject$fasta_dir, paste0(name, ".fasta"))
-      writeXStringSet(seq_set[i], out)
+      Biostrings::writeXStringSet(seq_set[i], out)
       out
     })
   }

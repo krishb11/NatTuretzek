@@ -14,6 +14,9 @@ jobs:
       matrix:
         r-version: ['4.2']
 
+    env:
+      _R_CHECK_FORCE_SUGGESTS_: false
+
     steps:
       - uses: actions/checkout@v4
 
@@ -38,31 +41,12 @@ jobs:
             libgit2-dev \
             libicu-dev
 
-      - name: Install CRAN dependencies
+      - name: Install CRAN dependencies only
         run: |
           install.packages(c(
             'rcmdcheck', 'remotes', 'dplyr', 'scales',
-            'readr', 'rlist', 'ggplot2', 'BiocManager'
+            'readr', 'rlist', 'ggplot2'
           ), repos = 'https://cloud.r-project.org')
-        shell: Rscript {0}
-
-      - name: Install sleuth from r-universe
-        run: |
-          install.packages(
-            'sleuth',
-            repos = c('https://pachterlab.r-universe.dev', 'https://cloud.r-project.org')
-          )
-        shell: Rscript {0}
-
-      - name: Install required Bioconductor packages (minimal direct set)
-        run: |
-          options(repos = BiocManager::repositories())
-          BiocManager::install(
-            c('Biostrings', 'biomaRt', 'HTSFilter', 'HTSCluster'),
-            ask = FALSE,
-            update = FALSE,
-            dependencies = TRUE
-          )
         shell: Rscript {0}
 
       - name: Check
