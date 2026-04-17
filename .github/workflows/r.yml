@@ -29,13 +29,35 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libcurl4-openssl-dev libssl-dev libxml2-dev
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libxml2-dev \
+            libharfbuzz-dev \
+            libfribidi-dev
 
-      - name: Install R dependencies
-        uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: any::rcmdcheck
-          needs: check
+      - name: Install CRAN dependencies
+        run: |
+          install.packages(c(
+            'rcmdcheck', 'remotes', 'dplyr', 'scales',
+            'readr', 'rlist', 'ggplot2'
+          ), repos = 'https://cloud.r-project.org')
+        shell: Rscript {0}
+
+      - name: Install Bioconductor dependencies
+        run: |
+          if (!requireNamespace('BiocManager', quietly = TRUE)) {
+            install.packages('BiocManager', repos = 'https://cloud.r-project.org')
+          }
+          BiocManager::install(
+            c('Biostrings', 'HTSFilter', 'HTSCluster', 'biomaRt', 'sleuth'),
+            ask = FALSE,
+            update = FALSE
+          )
+          if (!requireNamespace('sleuth', quietly = TRUE)) {
+            remotes::install_github('pachterlab/sleuth')
+          }
+        shell: Rscript {0}
 
       - name: Check
         run: rcmdcheck::rcmdcheck(args = c('--no-manual', '--as-cran'), error_on = 'error')
