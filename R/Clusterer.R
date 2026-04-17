@@ -1,5 +1,3 @@
-library(HTSFilter)
-library(HTSCluster)
 
 MyBeret <- function(pathtocsv, species, conditions, MuseObject=NULL) {
 		if(is.null(MuseObject)) {
@@ -17,6 +15,9 @@ MyBeret <- function(pathtocsv, species, conditions, MuseObject=NULL) {
 }
 
 FilterNow <- function(BeretObject) {
+	if (!requireNamespace("HTSFilter", quietly = TRUE)) {
+		stop("Package 'HTSFilter' is required for FilterNow().", call. = FALSE)
+	}
 	if(is.null(BeretObject$data)) {
 		counts <- read.csv(BeretObject$path, header=TRUE)
 	} else {
@@ -26,7 +27,7 @@ FilterNow <- function(BeretObject) {
 	counts <- counts[,2:ncol(counts)]
 	counts <- round(counts)
 	dataframe <- data.frame(row.names=colnames(counts), conditions=BeretObject$conditions)
-	filter.time <- HTSFilter(counts, conditions, norm="DESeq")
+	filter.time <- HTSFilter::HTSFilter(counts, conditions, norm="DESeq")
 	final_data <- filter.time$filteredData
 	final_data <- final_data+1
 	final_data <- cbind(as.character(rownames(counts), final_data))
@@ -38,11 +39,14 @@ FilterNow <- function(BeretObject) {
 }
 
 ClusterNow <- function(BeretObject) {
+	if (!requireNamespace("HTSCluster", quietly = TRUE)) {
+		stop("Package 'HTSCluster' is required for ClusterNow().", call. = FALSE)
+	}
 	data <- BeretObject$filteredData
 	genes <- data$genes
 	data$genes <- NULL
 	data <- as.matrix(data)
-	PMM <- PoisMixClusWrapper(y=data, gmin=1, gmax=25, conds=BeretObject$conditions, norm="DESeq")
+	PMM <- HTSCluster::PoisMixClusWrapper(y=data, gmin=1, gmax=25, conds=BeretObject$conditions, norm="DESeq")
 	list <- list()
 	list$BIC <- data_collector(PMM$BIC.results, BeretObject)
 	list$ICL <- data_collector(PMM$ICL.results, BeretObject)
